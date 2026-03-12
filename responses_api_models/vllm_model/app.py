@@ -631,10 +631,10 @@ class VLLMConverter(BaseModel):
                 prompt_token_ids=raw_message["prompt_token_ids"],
                 generation_token_ids=raw_message["generation_token_ids"],
                 generation_log_probs=raw_message["generation_log_probs"],
-                policy_staleness=choice.policy_staleness,
-                kv_cache_staleness=choice.kv_cache_staleness,
-                completed_at_step=choice.completed_at_step,
-                num_evictions=choice.num_evictions,
+                policy_staleness=[choice.policy_staleness],
+                kv_cache_staleness=[choice.kv_cache_staleness],
+                completed_at_step=[choice.completed_at_step],
+                num_evictions=[choice.num_evictions],
             )
 
         return response_output
