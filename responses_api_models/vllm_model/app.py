@@ -299,10 +299,9 @@ class VLLMModel(SimpleResponsesAPIModel):
                     # generation_token_ids=choice_dict["token_ids"],
                     generation_token_ids=generation_token_ids,
                     generation_log_probs=generation_log_probs,
-                    policy_staleness=policy_staleness,
-                    kv_cache_staleness=kv_cache_staleness,
-                    completed_at_step=completed_at_step,
-                    num_evictions=num_evictions,
+                    policy_epoch=[[(0, 0)]],
+                    kv_cache_epoch=[[(0, 0)]],
+                    num_evictions=[0],
                 )
             )
 
@@ -427,6 +426,9 @@ class VLLMConverter(BaseModel):
                     prompt_token_ids=m["prompt_token_ids"],
                     generation_token_ids=m["generation_token_ids"],
                     generation_log_probs=m["generation_log_probs"],
+                    policy_epoch=m["policy_epoch"],
+                    kv_cache_epoch=m["kv_cache_epoch"],
+                    num_evictions=m["num_evictions"],
                 )
 
         state.flush_assistant()
@@ -631,10 +633,9 @@ class VLLMConverter(BaseModel):
                 prompt_token_ids=raw_message["prompt_token_ids"],
                 generation_token_ids=raw_message["generation_token_ids"],
                 generation_log_probs=raw_message["generation_log_probs"],
-                policy_staleness=[choice.policy_staleness],
-                kv_cache_staleness=[choice.kv_cache_staleness],
-                completed_at_step=[choice.completed_at_step],
-                num_evictions=[choice.num_evictions],
+                policy_epoch=raw_message.get("policy_epoch", [[(0, 0)]]),
+                kv_cache_epoch=raw_message.get("kv_cache_epoch", [[(0, 0)]]),
+                num_evictions=raw_message.get("num_evictions", [0]),
             )
 
         return response_output

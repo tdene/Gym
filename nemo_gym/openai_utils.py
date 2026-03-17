@@ -96,18 +96,16 @@ class TokenIDLogProbMixin(BaseModel):
     prompt_token_ids: List[int]
     generation_token_ids: List[int]
     generation_log_probs: List[float]
-    policy_staleness: list[list[int]]
-    kv_cache_staleness: list[list[int]]
-    completed_at_step: list[int]
+    policy_epoch: list[list[tuple[int, int]]]
+    kv_cache_epoch: list[list[tuple[int, int]]]
     num_evictions: list[int]
 
 class TokenIDLogProbTypedDictMixin(TypedDict):
     prompt_token_ids: List[int]
     generation_token_ids: List[int]
     generation_log_probs: List[float]
-    policy_staleness: list[list[int]]
-    kv_cache_staleness: list[list[int]]
-    completed_at_step: list[int]
+    policy_epoch: list[list[tuple[int, int]]]
+    kv_cache_epoch: list[list[tuple[int, int]]]
     num_evictions: list[int]
 
 
