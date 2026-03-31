@@ -1,3 +1,7 @@
+---
+orphan: true
+---
+
 (tutorials-index)=
 
 # NeMo Gym Tutorials
@@ -22,50 +26,6 @@ Create custom resource servers and implement tool-based agent interactions.
 Implement or integrate existing tools and define task verification logic.
 +++
 {bdg-primary}`beginner` {bdg-secondary}`30 min` {bdg-secondary}`custom-environments` {bdg-secondary}`tools`
-:::
-
-::::
-
----
-
-## Rollout Collection and Training Data
-
-Implement rollout generation and training data preparation for RL, SFT, and DPO.
-
-::::{grid} 1 1 1 1
-:gutter: 1 1 1 2
-
-:::{grid-item-card} {octicon}`workflow;1.5em;sd-mr-1` Offline Training with Rollouts
-:link: offline-training-w-rollouts
-:link-type: doc
-Transform rollouts into training data for {term}`supervised fine-tuning (SFT) <SFT (Supervised Fine-Tuning)>` and {term}`direct preference optimization (DPO) <DPO (Direct Preference Optimization)>`.
-+++
-{bdg-secondary}`sft` {bdg-secondary}`dpo`
-:::
-
-::::
-
----
-
-## RL Training
-
-::::{grid} 1 1 2 2
-:gutter: 1 1 1 2
-
-:::{grid-item-card} {octicon}`workflow;1.5em;sd-mr-1` GRPO with NeMo RL
-:link: training-nemo-rl-grpo-index
-:link-type: ref
-Learn how to set up NeMo Gym and NeMo RL training environments, run tests, prepare data, and launch single-node and multi-node training runs.
-+++
-{bdg-primary}`training` {bdg-secondary}`rl` {bdg-secondary}`grpo` {bdg-secondary}`multi-step`
-:::
-
-:::{grid-item-card} {octicon}`zap;1.5em;sd-mr-1` Unsloth
-:link: training-unsloth
-:link-type: ref
-Fast, memory-efficient fine-tuning for single-step tasks: math, structured outputs, instruction following, reasoning gym and more.
-+++
-{bdg-primary}`training` {bdg-secondary}`unsloth` {bdg-secondary}`single-step`
 :::
 
 ::::

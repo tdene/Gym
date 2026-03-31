@@ -2,7 +2,7 @@
 
 NeMo Gym is a library for building reinforcement learning (RL) training environments for large language models (LLMs). It provides infrastructure to develop environments, scale rollout collection, and integrate seamlessly with your preferred training framework. 
 
-NeMo Gym is a component of the [NVIDIA NeMo Framework](https://docs.nvidia.com/nemo-framework/), NVIDIA’s GPU-accelerated platform for building and training generative AI models.
+NeMo Gym is a component of the [NVIDIA NeMo Framework](https://docs.nvidia.com/nemo-framework/). For details on how NeMo Gym fits within the NeMo ecosystem and integrates with other RL frameworks, see the [Ecosystem](https://docs.nvidia.com/nemo/gym/latest/about/ecosystem.html) documentation.
 
 
 ## 🏆 Why NeMo Gym?
@@ -15,6 +15,34 @@ NeMo Gym is a component of the [NVIDIA NeMo Framework](https://docs.nvidia.com/n
 
 > [!IMPORTANT]
 > NeMo Gym is currently in early development. You should expect evolving APIs, incomplete documentation, and occasional bugs. We welcome contributions and feedback - for any changes, please open an issue first to kick off discussion!
+
+## 🔗 Ecosystem Integrations
+
+NeMo Gym is designed to integrate seamlessly with the broader RL ecosystem. For detailed documentation, see the [Ecosystem](https://docs.nvidia.com/nemo/gym/latest/about/ecosystem.html) page.
+
+### Training Frameworks
+
+NeMo Gym provides rollout collection infrastructure that integrates with various RL training frameworks:
+
+| Framework | Status | Description |
+|-----------|--------|-------------|
+| [NeMo RL](https://github.com/NVIDIA-NeMo/RL) | ✅ Supported | NVIDIA's scalable post-training library with GRPO, DPO, SFT |
+| [Unsloth](https://github.com/unslothai/unsloth) | ✅ Supported | Fast fine-tuning framework with memory optimization |
+| [veRL](https://github.com/volcengine/verl) | 🔜 In Progress | Volcano Engine's scalable RL framework |
+| [TRL](https://github.com/huggingface/trl) | 🔜 In Progress | Hugging Face Transformer Reinforcement Learning |
+
+### Environment Libraries
+
+NeMo Gym integrates with environment libraries for diverse training scenarios:
+
+| Library | Status | Description |
+|---------|--------|-------------|
+| [reasoning-gym](https://github.com/open-thought/reasoning-gym) | ✅ Supported | Procedurally generated reasoning tasks (see `reasoning_gym` resource server) |
+| [Aviary](https://github.com/Future-House/aviary) | ✅ Supported | Multi-environment framework for tool-using agents (see `aviary` resource server) |
+| [PRIME Intellect](https://github.com/PrimeIntellect-ai) | 🔜 In Progress | Distributed AI training environments |
+| [BrowserGym](https://github.com/ServiceNow/BrowserGym) | 🔜 In Progress | Web browsing and automation environments |
+
+> 💡 **Want to add an integration?** We welcome contributions! See our [Contributing Guide](https://docs.nvidia.com/nemo/gym/latest/contribute/index.html) or [open an issue](https://github.com/NVIDIA-NeMo/Gym/issues) to discuss.
 
 ## 📋 Requirements
 
@@ -160,7 +188,6 @@ Purpose: Training-ready environments with curated datasets.
 | Mini Swe Agent             | coding                | <a href='https://huggingface.co/datasets/SWE-Gym/SWE-Gym'>SWE-Gym</a>                                                                                          | A software development with mini-swe-agent orchestration                                             | Improve software development capabilities, like SWE-bench                | <a href='resources_servers/mini_swe_agent/configs/mini_swe_agent.yaml'>config</a>                         | ✓     | ✓          | MIT                                                       |
 | Instruction Following      | instruction_following | <a href='https://huggingface.co/datasets/nvidia/Nemotron-RL-instruction_following'>Nemotron-RL-instruction_following</a>                                       | Instruction following datasets targeting IFEval and IFBench style instruction following capabilities | Improve IFEval and IFBench                                               | <a href='resources_servers/instruction_following/configs/instruction_following.yaml'>config</a>           | ✓     | -          | Apache 2.0                                                |
 | Structured Outputs         | instruction_following | <a href='https://huggingface.co/datasets/nvidia/Nemotron-RL-instruction_following-structured_outputs'>Nemotron-RL-instruction_following-structured_outputs</a> | Check if responses are following structured output requirements in prompts                           | Improve instruction following capabilities                               | <a href='resources_servers/structured_outputs/configs/structured_outputs_json.yaml'>config</a>            | ✓     | ✓          | Apache 2.0                                                |
-| Equivalence Llm Judge      | knowledge             | <a href='https://huggingface.co/datasets/nvidia/Nemotron-RL-knowledge-openQA'>Nemotron-RL-knowledge-openQA</a>                                                 | Short answer questions with LLM-as-a-judge                                                           | Improve knowledge-related benchmarks like GPQA / HLE                     | <a href='resources_servers/equivalence_llm_judge/configs/equivalence_llm_judge.yaml'>config</a>           | ✓     | -          | Apache 2.0                                                |
 | Mcqa                       | knowledge             | <a href='https://huggingface.co/datasets/nvidia/Nemotron-RL-knowledge-mcqa'>Nemotron-RL-knowledge-mcqa</a>                                                     | Multi-choice question answering problems                                                             | Improve benchmarks like MMLU / GPQA / HLE                                | <a href='resources_servers/mcqa/configs/mcqa.yaml'>config</a>                                             | ✓     | -          | Apache 2.0                                                |
 | Math With Judge            | math                  | <a href='https://huggingface.co/datasets/nvidia/Nemotron-RL-math-OpenMathReasoning'>Nemotron-RL-math-OpenMathReasoning</a>                                     | Math dataset with math-verify and LLM-as-a-judge                                                     | Improve math capabilities including AIME 24 / 25                         | <a href='resources_servers/math_with_judge/configs/math_with_judge.yaml'>config</a>                       | ✓     | ✓          | Creative Commons Attribution 4.0 International            |
 | Math With Judge            | math                  | <a href='https://huggingface.co/datasets/nvidia/Nemotron-RL-math-stack_overflow'>Nemotron-RL-math-stack_overflow</a>                                           | -                                                                                                    | -                                                                        | <a href='resources_servers/math_with_judge/configs/math_stack_overflow.yaml'>config</a>                   | ✓     | ✓          | Creative Commons Attribution-ShareAlike 4.0 International |
