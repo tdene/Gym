@@ -61,7 +61,7 @@ from nemo_gym.openai_utils import (
     NeMoGymSummary,
     TokenIDLogProbMixin,
 )
-from nemo_gym.server_utils import SESSION_ID_KEY, is_nemo_gym_fastapi_worker
+from nemo_gym.server_utils import SESSION_ID_KEY, is_nemo_gym_fastapi_entrypoint
 
 
 class VLLMModelConfig(BaseResponsesAPIModelConfig):
@@ -343,7 +343,7 @@ class VLLMModel(SimpleResponsesAPIModel):
                     choices=[
                         NeMoGymChoice(
                             index=0,
-                            finish_reason="stop",
+                            finish_reason="length",
                             message=NeMoGymChatCompletionMessage(
                                 role="assistant",
                                 content=None,
@@ -783,6 +783,9 @@ class VLLMConverter(BaseModel):
         for message in messages:
             role = message["role"]
             if role in ("user", "system", "developer"):
+                # vLLM may return None content
+                if message["content"] is None:
+                    message["content"] = ""
                 output_items.append(NeMoGymEasyInputMessage.model_validate(message))
             elif role == "assistant":
                 output_items.extend(self.postprocess_assistant_message_dict(message))
@@ -818,5 +821,5 @@ def split_responses_input_output_items(
 
 if __name__ == "__main__":
     VLLMModel.run_webserver()
-elif is_nemo_gym_fastapi_worker():
+elif is_nemo_gym_fastapi_entrypoint(__file__):
     app = VLLMModel.run_webserver()  # noqa: F401
