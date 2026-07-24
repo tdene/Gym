@@ -152,13 +152,16 @@ dependencies = [
     "yappi",
 
     # Ray: Used for distributed processing
-    # Pinned Wed Jul 01, 2026 to ==2.56.0 to match the training-container/head Ray.
-    # Unpinned "ray[default]" let cached fs1 server venvs (2.55.1, built 06-26) drift from the
-    # container head (2.56.0) -> "Version mismatch: cluster started with 2.56.0 / this process 2.55.1"
-    # -> resources_server can't join the Ray cluster -> gym down -> trainer idle -> idle-GPU cancel.
+    # Pinned to match the training-container/head Ray: the baked container installs nemo_gym
+    # with --no-deps, so the head (ng_run) runs the container's own Ray while server venvs
+    # resolve this pin -> any skew means servers can't join the cluster ("Version mismatch"),
+    # gym down, trainer dies at first rollout request. Bump this pin whenever the container's
+    # baked Ray changes, and delete Gym/*/.venv so servers rebuild.
+    # History: unpinned drift 2.55.1/2.56.0 (06-26 venvs); pinned 2.56.0 on 07-01; container
+    # moved to 2.56.1 (arm64-260407) -> re-broke on 07-24 (job 5578586); bumped to 2.56.1.
     # Security: Requires ray>=2.52.0.
     # License: Apache 2.0 https://github.com/ray-project/ray/blob/master/LICENSE
-    "ray[default]==2.56.0",
+    "ray[default]==2.56.1",
 
     # psutil: Cross-platform process and system utilities
     # Updated: Fri Nov 07, 2025 with psutil==6.1.1
