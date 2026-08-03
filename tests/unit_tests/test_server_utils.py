@@ -13,10 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import socket
+import time
 from unittest.mock import AsyncMock, MagicMock
 
 from aiohttp import ClientOSError
-from pytest import MonkeyPatch, raises
+from pytest import MonkeyPatch, mark, raises
 
 import nemo_gym.global_config
 import nemo_gym.server_utils
@@ -396,3 +397,146 @@ class TestServerUtils:
         response = await nemo_gym.server_utils.request("POST", "http://flaky-host:1/v1")
         assert response is client.success_response
         assert client.request.await_count == 5
+
+    def _make_map_client(self) -> ServerClient:
+        return ServerClient(
+            head_server_config=BaseServerConfig(host="head-host", port=12345),
+            global_config_dict=DictConfig({"my_server": {"a": {"b": {"host": "old-host", "port": 1111}}}}),
+        )
+
+    def _reset_module_state(self, monkeypatch: MonkeyPatch) -> None:
+        monkeypatch.setattr(nemo_gym.server_utils, "_HEAD_CONFIG_CACHE", {})
+        monkeypatch.setattr(nemo_gym.server_utils, "_HEAD_CONFIG_FETCH_INFLIGHT", False)
+        monkeypatch.setattr(nemo_gym.server_utils, "_HEAD_CONFIG_LAST_FAILURE", 0.0)
+
+    @mark.parametrize(
+        ("prime", "expect_host", "fetches"),
+        [
+            ("cache", "new-host", False),  # fresh shared-cache entry serves every client, no HTTP
+            ("failure", "old-host", False),  # negative cache after a failed probe: keep the stale map, no stampede
+            ("empty", "new-host", True),  # cold: one fetch from the head updates the map and the shared cache
+        ],
+    )
+    async def test_refresh_global_config_paths(
+        self, monkeypatch: MonkeyPatch, prime: str, expect_host: str, fetches: bool
+    ) -> None:
+        self._reset_module_state(monkeypatch)
+        client = self._make_map_client()
+        monkeypatch.setattr(nemo_gym.server_utils.asyncio, "sleep", AsyncMock())
+        if prime == "cache":
+            cached_map = DictConfig({"my_server": {"a": {"b": {"host": "new-host", "port": 2222}}}})
+            monkeypatch.setitem(
+                nemo_gym.server_utils._HEAD_CONFIG_CACHE, ("head-host", 12345), (time.monotonic(), cached_map)
+            )
+        elif prime == "failure":
+            monkeypatch.setattr(nemo_gym.server_utils, "_HEAD_CONFIG_LAST_FAILURE", time.monotonic())
+        if fetches:
+            fake_response = MagicMock()
+            fake_response.content = b'{"my_server": {"a": {"b": {"host": "new-host", "port": 2222}}}}'
+
+            async def fake_to_thread(fn, *args, **kwargs):
+                return fake_response
+
+            monkeypatch.setattr(nemo_gym.server_utils.asyncio, "to_thread", fake_to_thread)
+        else:
+            monkeypatch.setattr(
+                nemo_gym.server_utils.requests, "get", MagicMock(side_effect=AssertionError("must not fetch"))
+            )
+
+        await client._refresh_global_config()
+
+        assert client.global_config_dict["my_server"]["a"]["b"]["host"] == expect_host
+        if fetches:
+            assert ("head-host", 12345) in nemo_gym.server_utils._HEAD_CONFIG_CACHE
+
+    async def test_request_reresolves_the_map_on_sustained_connection_errors(self, monkeypatch: MonkeyPatch) -> None:
+        from aiohttp import ClientConnectionError
+
+        self._reset_module_state(monkeypatch)
+        client = self._make_map_client()
+        seen_urls = []
+
+        async def fake_request(method, url, **kwargs):
+            seen_urls.append(url)
+            if "old-host" in url:
+                raise ClientConnectionError()
+            response = MagicMock()
+            response.status = 200
+            return response
+
+        monkeypatch.setattr(nemo_gym.server_utils, "request", fake_request)
+
+        async def fake_refresh(self_client):
+            self_client.global_config_dict = DictConfig(
+                {"my_server": {"a": {"b": {"host": "new-host", "port": 2222}}}}
+            )
+
+        monkeypatch.setattr(ServerClient, "_refresh_global_config", fake_refresh)
+
+        response = await client.post(server_name="my_server", url_path="/run")
+
+        assert response.status == 200
+        assert seen_urls == ["http://old-host:1111/run", "http://new-host:2222/run"]
+
+    async def test_request_retries_a_stale_route_exactly_once(self, monkeypatch: MonkeyPatch) -> None:
+        self._reset_module_state(monkeypatch)
+        client = self._make_map_client()
+        statuses = iter([404, 404])
+        calls = {"n": 0}
+
+        async def fake_request(method, url, **kwargs):
+            calls["n"] += 1
+            response = MagicMock()
+            response.status = next(statuses)
+            return response
+
+        monkeypatch.setattr(nemo_gym.server_utils, "request", fake_request)
+        refresh = AsyncMock()
+        monkeypatch.setattr(ServerClient, "_refresh_global_config", refresh)
+
+        response = await client.post(server_name="my_server", url_path="/run")
+
+        # A second 404 is a real routing problem and is returned, not retried.
+        assert response.status == 404
+        assert calls["n"] == 2
+        refresh.assert_awaited_once()
+
+    @mark.parametrize("head_learns", [True, False])
+    async def test_request_tolerates_convergence_but_bounds_a_missing_server(
+        self, monkeypatch: MonkeyPatch, head_learns: bool
+    ) -> None:
+        """Transiently-missing server names re-resolve and recover; a name the
+        head never publishes warns while retrying and finally raises the
+        KeyError instead of spinning silently forever."""
+        self._reset_module_state(monkeypatch)
+        client = ServerClient(
+            head_server_config=BaseServerConfig(host="head-host", port=12345),
+            global_config_dict=DictConfig({}),
+        )
+        monkeypatch.setattr(nemo_gym.server_utils, "_SERVER_NAME_MISSING_MAX_ATTEMPTS", 3)
+        monkeypatch.setattr(nemo_gym.server_utils.asyncio, "sleep", AsyncMock())
+
+        async def fake_request(method, url, **kwargs):
+            response = MagicMock()
+            response.status = 200
+            return response
+
+        monkeypatch.setattr(nemo_gym.server_utils, "request", fake_request)
+        refreshes = {"n": 0}
+
+        async def fake_refresh(self_client):
+            refreshes["n"] += 1
+            if head_learns and refreshes["n"] == 2:
+                self_client.global_config_dict = DictConfig(
+                    {"my_server": {"a": {"b": {"host": "new-host", "port": 2222}}}}
+                )
+
+        monkeypatch.setattr(ServerClient, "_refresh_global_config", fake_refresh)
+
+        if head_learns:
+            response = await client.post(server_name="my_server", url_path="/run")
+            assert response.status == 200
+        else:
+            with raises(KeyError):
+                await client.post(server_name="my_server", url_path="/run")
+            assert refreshes["n"] == 2  # bound 3: two re-resolve attempts, the third look-up raises
