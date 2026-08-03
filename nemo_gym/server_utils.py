@@ -35,6 +35,7 @@ import ray
 import requests
 import uvicorn
 from aiohttp import (
+    ClientConnectionError,
     ClientOSError,
     ClientResponse,
     ClientResponseError,
@@ -63,6 +64,7 @@ from nemo_gym.config_types import (
 from nemo_gym.global_config import (
     DRY_RUN_KEY_NAME,
     HEAD_SERVER_KEY_NAME,
+    NEMO_GYM_CONFIG_DICT_ENV_VAR_NAME,
     NEMO_GYM_CONFIG_PATH_ENV_VAR_NAME,
     OBSERVABILITY_ENABLED_KEY_NAME,
     RAY_HEAD_NODE_ADDRESS_KEY_NAME,
@@ -296,6 +298,27 @@ async def get_response_json(response: ClientResponse) -> Any:
 
 DEFAULT_HEAD_SERVER_PORT = 11000
 
+# ~60s at request()'s 0.5s retry sleep: long enough to ride out transient
+# overload (the historical reason connection errors retried forever), short
+# enough that a component restart heals in about a minute instead of never.
+_SERVER_CLIENT_CONNECTION_RETRIES = 120
+# ~5 minutes at the 2s re-resolve cadence: long enough to ride out head
+# convergence after a restart, bounded so a server name the head NEVER
+# publishes (a config typo) surfaces as the KeyError it is instead of
+# spinning silently forever.
+_SERVER_NAME_MISSING_MAX_ATTEMPTS = 150
+_HEAD_CONFIG_CACHE_TTL_S = 15.0
+# head (host, port) -> (monotonic fetch time, DictConfig). Deliberately
+# lockless: an asyncio.Lock here would bind to the first event loop that
+# contends on it and raise from any other loop — worse than the duplicate
+# fetches it would prevent. Coalescing is done with the cache TTL, an
+# in-flight flag, and a negative cache on failure; races just cost an extra
+# head GET.
+_HEAD_CONFIG_CACHE: dict = {}
+_HEAD_CONFIG_FETCH_INFLIGHT: bool = False
+_HEAD_CONFIG_LAST_FAILURE: float = 0.0
+_HEAD_CONFIG_FAILURE_BACKOFF_S = 5.0
+
 ServerStatus = Union[Literal["success"], Literal["connection_error"], Literal["timeout"], Literal["unknown_error"]]
 
 
@@ -337,38 +360,157 @@ class ServerClient(BaseModel):
     def _build_server_base_url(self, server_config_dict: OmegaConf) -> str:
         return f"http://{server_config_dict.host}:{server_config_dict.port}"
 
+    async def _refresh_global_config(self) -> None:
+        """Re-fetch the server map from the head server.
+
+        Component servers sit on randomly drawn ports recorded in the global
+        config dict at startup. If a component dies and its supervisor
+        restarts it, it comes back on a NEW port while the head port stays
+        pinned — so a client holding the old map floods dead sockets forever.
+        Re-resolving from the head heals that. Fetches are coalesced across
+        the many ServerClient instances in a process via a module-level cache
+        keyed by head address: one HTTP fetch per window, and every instance
+        still gets its own map updated.
+        """
+        global _HEAD_CONFIG_FETCH_INFLIGHT, _HEAD_CONFIG_LAST_FAILURE
+
+        head = self.head_server_config
+        cache_key = (head.host, head.port)
+        cached = _HEAD_CONFIG_CACHE.get(cache_key)
+        if cached is not None and (time.monotonic() - cached[0]) < _HEAD_CONFIG_CACHE_TTL_S:
+            self.global_config_dict = cached[1]
+            return
+
+        # Negative cache: if a probe just failed, don't stampede the head
+        # with one blocking GET per waiting coroutine while it reboots.
+        if (time.monotonic() - _HEAD_CONFIG_LAST_FAILURE) < _HEAD_CONFIG_FAILURE_BACKOFF_S:
+            await asyncio.sleep(2)
+            return
+
+        if _HEAD_CONFIG_FETCH_INFLIGHT:
+            await asyncio.sleep(2)
+            cached = _HEAD_CONFIG_CACHE.get(cache_key)
+            if cached is not None and (time.monotonic() - cached[0]) < _HEAD_CONFIG_CACHE_TTL_S:
+                self.global_config_dict = cached[1]
+            return
+
+        _HEAD_CONFIG_FETCH_INFLIGHT = True
+        try:
+            url = f"http://{head.host}:{head.port}/global_config_dict_yaml"
+            try:
+                # requests via to_thread: keep the event loop unblocked without
+                # routing through the global aiohttp client (whose connection
+                # errors are what brought us here).
+                response = await asyncio.to_thread(requests.get, url, timeout=30)
+                response.raise_for_status()
+                new_config = OmegaConf.create(json.loads(response.content.decode()))
+            except Exception as e:
+                _HEAD_CONFIG_LAST_FAILURE = time.monotonic()
+                print(
+                    f"[server_client] head re-resolution failed at {url} "
+                    f"({type(e).__name__}: {e}); the head may still be restarting — will retry",
+                    flush=True,
+                )
+                return
+
+            _HEAD_CONFIG_CACHE[cache_key] = (time.monotonic(), new_config)
+            self.global_config_dict = new_config
+            # Keep the process-level cached copy that seeded us in sync for
+            # any future reader (get_global_config_dict falls back to this
+            # environment variable).
+            try:
+                environ[NEMO_GYM_CONFIG_DICT_ENV_VAR_NAME] = json.dumps(
+                    OmegaConf.to_container(new_config, resolve=True)
+                )
+            except Exception:
+                pass
+            print(f"[server_client] re-resolved the server map from the head at {url}", flush=True)
+        finally:
+            _HEAD_CONFIG_FETCH_INFLIGHT = False
+
     async def request(
         self, server_name: str, url_path: str, method: str, **kwargs: Unpack[_RequestOptions]
     ) -> ClientResponse:
-        server_config_dict = get_first_server_config_dict(self.global_config_dict, server_name)
-        base_url = self._build_server_base_url(server_config_dict)
-
         json_obj = kwargs.get("json")
         if "json" in kwargs:
             if isinstance(json_obj, BaseModel):
                 json_obj = json_obj.model_dump(exclude_unset=True)
                 kwargs["json"] = json_obj
 
-        observability_enabled = self.global_config_dict.get(OBSERVABILITY_ENABLED_KEY_NAME, False)
-        server_entry = self.global_config_dict.get(server_name)
-        rollout_id = current_rollout_id()
-        if observability_enabled and server_entry is not None and "resources_servers" in server_entry:
-            if url_path == "/verify":
-                rollout_id = rollout_id or maybe_rollout_id_from_run_body(json_obj)
-            if rollout_id is not None and not url_path.startswith(f"/{ROLLOUT_PATH_PREFIX}/"):
+        # NOTE on retry semantics: connection-level retries here (and the
+        # bounded retries inside request()) RE-SEND the request, the same
+        # behavior the historical infinite-retry loop had — except the stale
+        # server map is now healable instead of being flooded forever.
+        retried_stale_route = False
+        server_missing_attempts = 0
+        while True:
+            try:
+                server_config_dict = get_first_server_config_dict(self.global_config_dict, server_name)
+            except KeyError:
+                # A refreshed map can transiently miss a server while the head
+                # converges after a restart: back off and re-resolve. But a
+                # name the head NEVER publishes is a config bug, not
+                # convergence — warn while retrying and raise once the bound
+                # is spent, instead of spinning silently forever.
+                server_missing_attempts += 1
+                if server_missing_attempts >= _SERVER_NAME_MISSING_MAX_ATTEMPTS:
+                    raise
+                if server_missing_attempts % 15 == 1:
+                    print(
+                        f"[server_client] server '{server_name}' missing from the head's map "
+                        f"(attempt {server_missing_attempts}/{_SERVER_NAME_MISSING_MAX_ATTEMPTS}); re-resolving",
+                        flush=True,
+                    )
+                await asyncio.sleep(2)
+                await self._refresh_global_config()
+                continue
+            base_url = self._build_server_base_url(server_config_dict)
+
+            observability_enabled = self.global_config_dict.get(OBSERVABILITY_ENABLED_KEY_NAME, False)
+            server_entry = self.global_config_dict.get(server_name)
+            rollout_id = current_rollout_id()
+            if observability_enabled and server_entry is not None and "resources_servers" in server_entry:
+                if url_path == "/verify":
+                    rollout_id = rollout_id or maybe_rollout_id_from_run_body(json_obj)
+                if rollout_id is not None and not url_path.startswith(f"/{ROLLOUT_PATH_PREFIX}/"):
+                    url_path = f"{rollout_path_prefix(rollout_id)}{url_path}"
+
+            if (
+                rollout_id is not None
+                and observability_enabled
+                and server_entry is not None
+                and "responses_api_models" in server_entry
+                and url_path.partition("?")[0] in {"/v1/responses", "/v1/chat/completions", "/v1/messages"}
+                and not url_path.startswith(f"/{ROLLOUT_PATH_PREFIX}/")
+            ):
                 url_path = f"{rollout_path_prefix(rollout_id)}{url_path}"
 
-        if (
-            rollout_id is not None
-            and observability_enabled
-            and server_entry is not None
-            and "responses_api_models" in server_entry
-            and url_path.partition("?")[0] in {"/v1/responses", "/v1/chat/completions", "/v1/messages"}
-            and not url_path.startswith(f"/{ROLLOUT_PATH_PREFIX}/")
-        ):
-            url_path = f"{rollout_path_prefix(rollout_id)}{url_path}"
+            try:
+                response = await request(
+                    method=method,
+                    url=f"{base_url}{url_path}",
+                    _internal=True,
+                    _max_connection_retries=_SERVER_CLIENT_CONNECTION_RETRIES,
+                    **kwargs,
+                )
+            except ClientConnectionError:
+                # ~60s of straight connection failures against one component:
+                # its port may have moved (component restart). Re-resolve and
+                # retry with fresh addresses; never give up, matching the
+                # historical infinite-retry contract — but healable now.
+                await self._refresh_global_config()
+                continue
 
-        return await request(method=method, url=f"{base_url}{url_path}", _internal=True, **kwargs)
+            # One-shot heal for a stale ROUTE: a request that lands on a
+            # freshly restarted process serving a different component answers
+            # 404/405 instead of failing to connect. Anything after the retry
+            # is a real routing/config problem and is returned to the caller.
+            if getattr(response, "status", None) in (404, 405) and not retried_stale_route:
+                retried_stale_route = True
+                await self._refresh_global_config()
+                continue
+
+            return response
 
     async def get(
         self,
