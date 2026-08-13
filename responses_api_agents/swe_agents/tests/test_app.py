@@ -261,6 +261,7 @@ class TestSWEBenchWrapperConfig:
         assert config.apptainer_memory_limit_mb == 64 * 1024
         assert config.command_exec_timeout == 5 * 60
         assert config.concurrency == 256
+        assert config.ray_num_cpus_per_worker == 0.1
         assert config.dataset_path is None
         assert config.agent_prompt_overrides is None
         assert config.agent_prompt_override_random is False
@@ -1856,6 +1857,20 @@ class TestGetAllSessionTrajectories:
 class TestRunnerRayRemote:
     def test_is_ray_remote(self) -> None:
         assert hasattr(runner_ray_remote, "remote")
+
+    async def test_dispatch_reserves_configured_ray_cpus(self, monkeypatch) -> None:
+        wrapper = _create_wrapper(monkeypatch)
+        wrapper.config.ray_num_cpus_per_worker = 2.0
+        options_mock = MagicMock()
+        options_mock.return_value.remote = AsyncMock(side_effect=RuntimeError("dispatched"))
+        monkeypatch.setattr(swe_app, "runner_ray_remote", MagicMock(options=options_mock))
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            params = _make_instance_config(tmpdir)
+            with pytest.raises(RuntimeError, match="dispatched"):
+                await wrapper._inner_responses(params, MagicMock())
+
+        options_mock.assert_called_once_with(num_cpus=2.0)
 
 
 ########################################
