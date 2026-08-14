@@ -16,11 +16,10 @@ from collections.abc import Callable
 from io import StringIO
 from pathlib import Path
 from subprocess import run
-from typing import Optional
+from typing import Any, Optional
 
 import yappi
 from pydantic import BaseModel
-from pydot import graph_from_dot_file
 
 
 def _require_gprof2dot() -> Callable[..., None]:
@@ -32,6 +31,17 @@ def _require_gprof2dot() -> Callable[..., None]:
         ) from e
 
     return gprof2dot_main
+
+
+def _require_pydot() -> Callable[..., Any]:
+    try:
+        from pydot import graph_from_dot_file
+    except ModuleNotFoundError as e:
+        raise ModuleNotFoundError(
+            "pydot is required for CPU profiling. Install nemo-gym[dev] before enabling profiling."
+        ) from e
+
+    return graph_from_dot_file
 
 
 class Profiler(BaseModel):
@@ -69,6 +79,7 @@ Please install dot using:
 
     def dump(self) -> None:
         gprof2dot_main = _require_gprof2dot()
+        graph_from_dot_file = _require_pydot()
 
         self.base_profile_dir.mkdir(parents=True, exist_ok=True)
         log_path = self.base_profile_dir / f"{self.name}.log"
