@@ -41,10 +41,8 @@ from typing import Any, Dict, List, Literal, NamedTuple, Optional, Tuple, Union
 
 import ray
 import tomlkit
-from gprof2dot import main as gprof2dot_main
 from openai.types.responses.function_tool import FunctionTool
 from pydantic import BaseModel, ConfigDict, Field
-from pydot import graph_from_dot_file
 
 from nemo_gym import CACHE_DIR, PARENT_DIR, RESULTS_DIR
 from nemo_gym.base_resources_server import (
@@ -68,7 +66,7 @@ from nemo_gym.openai_utils import (
     NeMoGymResponse,
     NeMoGymResponseCreateParamsNonStreaming,
 )
-from nemo_gym.profiling import Profiler
+from nemo_gym.profiling import Profiler, _require_gprof2dot, _require_pydot
 from nemo_gym.server_utils import get_first_server_config_dict
 from responses_api_models.vllm_model.app import VLLMConverter, split_responses_input_output_items
 
@@ -2743,6 +2741,8 @@ class RunOpenHandsAgent(BaseModel):
         # Dump out dot and png files from profiling on OpenHands level
         if self.config.debug:
             try:
+                gprof2dot_main = _require_gprof2dot()
+                graph_from_dot_file = _require_pydot()
                 profiling_name = "openhands"
                 callgrind_path = self.config.profiling_dir / f"{profiling_name}.callgrind"
                 callgrind_dotfile_path = self.config.profiling_dir / f"{profiling_name}.dot"
