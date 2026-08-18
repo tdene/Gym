@@ -26,7 +26,7 @@ from nemo_gym.profiling import Profiler
 
 class TestProfiling:
     def test_sanity(self, tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
-        monkeypatch.setattr(nemo_gym.profiling, "graph_from_dot_file", MagicMock(return_value=(MagicMock(),)))
+        monkeypatch.setattr(nemo_gym.profiling, "_require_pydot", lambda: MagicMock(return_value=(MagicMock(),)))
 
         monkeypatch.setattr(Profiler, "_check_for_dot_installation", MagicMock())
 
@@ -49,6 +49,28 @@ class TestProfiling:
             level: int = 0,
         ) -> Any:
             if name == "gprof2dot":
+                raise ModuleNotFoundError(name)
+            return real_import(name, globals_, locals_, fromlist, level)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+
+        profiler = Profiler(name="test_name", base_profile_dir=tmp_path / "profile")
+        with raises(ModuleNotFoundError, match=r"Install nemo-gym\[dev\]"):
+            profiler.dump()
+
+        assert not profiler.base_profile_dir.exists()
+
+    def test_profiler_reports_missing_pydot(self, tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+        real_import = builtins.__import__
+
+        def fake_import(
+            name: str,
+            globals_: dict[str, Any] | None = None,
+            locals_: dict[str, Any] | None = None,
+            fromlist: tuple[str, ...] = (),
+            level: int = 0,
+        ) -> Any:
+            if name == "pydot":
                 raise ModuleNotFoundError(name)
             return real_import(name, globals_, locals_, fromlist, level)
 
